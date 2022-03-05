@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.preprocessing import OrdinalEncoder, LabelEncoder
+from tqdm.keras import TqdmCallback
 
 df = pd.read_csv('export.csv')
 
@@ -83,6 +84,9 @@ for i in range(len(next_event_encoded)):
     current = np.append(current,[0,0,0,0,0])
     labels.append(current)
 
+labels = labels[:200000]
+training = training[:200000]
+
 model = keras.Sequential([
     keras.layers.Flatten(input_shape=(6,)),
     keras.layers.Dense(128, activation='relu'),
@@ -91,4 +95,4 @@ model = keras.Sequential([
 
 model.compile(optimizer='adam',loss='sparse_categorical_crossentropy',metrics=['accuracy'])
 
-model.fit(training,labels,epochs=1,verbose=1)
+model.fit(training,labels,epochs=1,verbose=0,callbacks=[TqdmCallback(verbose=2)])

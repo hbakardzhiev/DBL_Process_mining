@@ -12,6 +12,7 @@ from datetime import date
 from datetime import datetime
 from datetime import timedelta
 from sklearn.feature_selection import SelectKBest
+from hyperopt import hp, fmin, tpe, STATUS_OK, Trials
 
 from numba import jit
 
@@ -42,7 +43,8 @@ from keras.layers import Dense
 from keras.layers import LSTM
 from keras.layers import Activation
 from keras.layers import Dropout
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import GridSearchCV
+from sklearn.linear_model import LinearRegression
 
 file_export = 'export2018.csv'
 data = pd.read_csv(file_export)
@@ -178,13 +180,13 @@ train = train[train['case'].isin(intersect_list) == False]
 X_train_time = train.drop(columns='duration')
 Y_train_time = train["duration"]
 X_train_event = train.drop(columns=["next_event"])
-Y_train_event = train["event"]
+Y_train_event = train["next_event"]
 
 test = test[test['case'].isin(intersect_list) == False]
 X_test_time = test.drop(columns='duration')
 Y_test_time = test["duration"]
 X_test_event = test.drop(columns=['next_event'])
-Y_test_event = test["event"]
+Y_test_event = test["next_event"]
 
 # Random forest event
 # DT = DecisionTreeClassifier()
@@ -194,32 +196,90 @@ def calc_feature_selection():
     select = SelectKBest(k=10)  # takes best 10 arguments
     z = select.fit_transform(X_train_time, Y_train_time)
     filter = select.get_support()
+    print(np.extract(filter, select.scores_))
     print(np.extract(filter, X_train_time.columns))
     #['event' 'penalty_AVBP' 'penalty_AVGP' 'eventid' 'activity' 'docid' 'subprocess' 'success' 'next_event' 'enc_event'] for time
 
     select = SelectKBest(k=10)  # takes best 10 arguments
     z = select.fit_transform(X_train_event, Y_train_event)
     filter = select.get_support()
+    print(np.extract(filter, select.scores_))
     print(np.extract(filter, X_train_event.columns))
     # ['event' 'selected_random' 'note' 'eventid' 'activity' 'subprocess' 'org:resource' 'duration' 'prev_event' 'enc_event'] for event
+
+
+def tune_rf():
+    param_grid = {
+        'bootstrap': [True],
+        'max_depth': [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, None],
+        'max_features': ['auto', 'sqrt', 'log2'],
+        'min_samples_leaf': [1, 2, 4],
+        'min_samples_split': [2, 5, 10],
+    }
+    RF = RandomForestClassifier(
+        # n_estimators=300,
+        #                         min_samples_split=10,
+        #                         min_samples_leaf=2,
+        #                         max_features='sqrt',
+        #                         max_depth=50,
+        #                         bootstrap=True
+    )
+    RF = GridSearchCV(
+        estimator=RF,
+        param_grid=param_grid,
+        scoring='accuracy',
+        #   n_iter=1,
+        #   cv=5,
+        verbose=2,
+        # random_state=42,
+        n_jobs=6)
+    dataset_col = [
+        'event',
+        'selected_random',
+        'note',
+        'eventid',
+        'activity',
+        'subprocess',
+        'org:resource',
+        'duration',
+        'prev_event',
+    ]
+
+    RF_fit = RF.fit(X_train_event[:10000].filter(items=dataset_col),
+                    Y_train_event[:10000])
+    print(RF.best_params_)
+    RF_pred = RF_fit.predict(X_test_event[:10000].filter(items=dataset_col))
+    org_test["event_RF"] = RF_pred
+    print("Accuracy for Random Forest: ",
+          accuracy_score(Y_test_event[:10000], RF_pred[:10000]))
 
 
 def calc_random_forest():
     # Create the random grid
 
-    RF = RandomForestClassifier(n_estimators=300,
-                                min_samples_split=10,
-                                min_samples_leaf=2,
-                                max_features='sqrt',
-                                max_depth=50,
+    RF = RandomForestClassifier(n_jobs=6,
+                                verbose=2,
+                                n_estimators=100,
+                                min_samples_split=5,
+                                min_samples_leaf=1,
+                                max_features='auto',
+                                max_depth=80,
                                 bootstrap=True)
 
     dataset_col = [
-        'event', 'selected_random', 'note', 'eventid', 'activity',
-        'subprocess', 'org:resource', 'duration', 'prev_event', 'enc_event'
+        'event',
+        'selected_random',
+        'note',
+        'eventid',
+        'activity',
+        'subprocess',
+        'org:resource',
+        'duration',
+        'prev_event',
     ]
 
     RF_fit = RF.fit(X_train_event.filter(items=dataset_col), Y_train_event)
+    # print(RF_fit.best)
     RF_pred = RF_fit.predict(X_test_event.filter(items=dataset_col))
     org_test["event_RF"] = RF_pred
     print("Accuracy for Random Forest: ",
@@ -227,13 +287,13 @@ def calc_random_forest():
 
 
 def calc_LSTM():
-    listVal = train
+    listVal = X_train_time
     columnNames = [
         'event', 'penalty_AVBP', 'penalty_AVGP', 'eventid', 'activity',
         'docid', 'subprocess', 'success', 'next_event', 'enc_event'
     ]
     listValSelected = listVal[columnNames]
-    listValSelected_prediction = test[columnNames]
+    listValSelected_prediction = X_test_time[columnNames]
     listValSelected_prediction = listValSelected_prediction.values
     listValDuration_prediction = org_test['duration']
     listValDuration_prediction = listValDuration_prediction.values
@@ -265,8 +325,8 @@ def calc_LSTM():
 
     model.fit(X,
               y,
-              batch_size=100,
-              epochs=1,
+              batch_size=400,
+              epochs=5,
               verbose=1,
               workers=-1,
               use_multiprocessing=True)
@@ -279,9 +339,13 @@ def calc_LSTM():
     print(
         mean_absolute_error(listValDuration_prediction,
                             yhat.flatten()[:len(listValDuration_prediction)]))
+    print(yhat)
     # return yhat.flatten()
 
 
 # calc_feature_selection()
 # calc_random_forest()
 # calc_LSTM()
+# tune_rf()
+# calc_event()
+# linear_regression()

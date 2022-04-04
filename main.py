@@ -236,17 +236,14 @@ def tune_rf():
     dataset_col = [
         'event',
         'selected_random',
-        'note',
-        'eventid',
-        'activity',
         'subprocess',
         'org:resource',
         'duration',
         'prev_event',
     ]
 
-    RF_fit = RF.fit(X_train_event[:10000].filter(items=dataset_col),
-                    Y_train_event[:10000])
+    RF_fit = RF.fit(X_train_event[:100000].filter(items=dataset_col),
+                    Y_train_event[:100000])
     print(RF.best_params_)
     RF_pred = RF_fit.predict(X_test_event[:10000].filter(items=dataset_col))
     org_test["event_RF"] = RF_pred
@@ -260,18 +257,15 @@ def calc_random_forest():
     RF = RandomForestClassifier(n_jobs=6,
                                 verbose=2,
                                 n_estimators=100,
-                                min_samples_split=5,
-                                min_samples_leaf=1,
-                                max_features='auto',
+                                min_samples_split=2,
+                                min_samples_leaf=4,
+                                max_features='log2',
                                 max_depth=80,
                                 bootstrap=True)
 
     dataset_col = [
         'event',
         'selected_random',
-        'note',
-        'eventid',
-        'activity',
         'subprocess',
         'org:resource',
         'duration',
@@ -344,8 +338,7 @@ def calc_LSTM():
 
 
 # calc_feature_selection()
-# calc_random_forest()
+calc_random_forest()
 # calc_LSTM()
 # tune_rf()
-# calc_event()
 # linear_regression()

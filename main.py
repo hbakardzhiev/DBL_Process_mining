@@ -13,6 +13,9 @@ from datetime import datetime
 from datetime import timedelta
 from sklearn.feature_selection import SelectKBest
 from hyperopt import hp, fmin, tpe, STATUS_OK, Trials
+from tensorflow import keras
+from sklearn.linear_model import HuberRegressor
+import tracemalloc
 
 from numba import jit
 
@@ -45,6 +48,25 @@ from keras.layers import Activation
 from keras.layers import Dropout
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LinearRegression
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+
+tracemalloc.start()
+
+
+def time_metrics(y_test, y_pred, model="..."):
+
+    print("\n")
+    print(f"Error metrics for the {model} time model")
+    print("\n")
+    print('Mean Absolute Error:', mean_absolute_error(y_test, y_pred))
+    print('Mean Squared Error:', mean_squared_error(y_test, y_pred))
+    print('Root Mean Squared Error:',
+          np.sqrt(mean_squared_error(y_test, y_pred)))
+    print('$R_2$ score:', r2_score(y_test, y_pred))
+    print("\n")
+
 
 file_export = 'export2018.csv'
 data = pd.read_csv(file_export)
@@ -189,7 +211,85 @@ X_test_event = test.drop(columns=['next_event'])
 Y_test_event = test["next_event"]
 
 # Random forest event
-# DT = DecisionTreeClassifier()
+
+# Naive event
+data_baseline = org_train[[
+    "case", "event", "startTime", "completeTime", "next_event", "enc_event",
+    "original index"
+]].copy()
+
+
+# Naive Bayes
+def naive_baseline():
+    @jit(parallel=True)
+    def calculator_pos(case):
+        res = np.empty(len(case), dtype=object)
+        idx = 0
+        count = 1
+        for _ in case:
+            if (idx + 1 >= len(case)):
+                break
+            if (case[idx] == case[idx - 1]):
+                count += 1
+                res[idx] = count
+            else:
+                count = 1
+                res[idx] = count
+            idx += 1
+        res[-1] = count + 1
+        return res
+
+    #get the position of each event per case
+    data_baseline = org_train[[
+        "case", "event", "startTime", "completeTime", "next_event",
+        "enc_event", "original index"
+    ]].copy()
+    data_baseline["pos"] = calculator_pos(data_baseline['case'].to_numpy())
+    #data_baseline = data_baseline[["case", "event", "startTime", "completeTime", "next_event", "enc_event",  "pos", "original index"]].copy()
+
+    #select most occuring event for each position
+    #see https://stackoverflow.com/questions/15222754/groupby-pandas-dataframe-and-select-most-common-value
+    events_count = data_baseline.groupby("pos")['enc_event'].agg(
+        lambda x: pd.Series.mode(x)[0]).to_frame()
+    events_count = events_count.rename(columns={"pos": "enc_event"})
+    #Next event for each position (most occuring event in the next position, e.g. 1-25, 2-26, so for 1 we predict 26)
+    events_count['next_event2'] = events_count['enc_event'].shift(-1)
+    events_count["next_event2"].iloc[-1] = 0
+    #map the model results to the original dataframe
+    data_baseline["next_event2"] = data_baseline["pos"].map(
+        events_count["next_event2"])
+    #Cleaning, set last events for each case to -1, so that we don't use them in final result and error estimation.
+    data_baseline["index"] = data_baseline.index
+    #find last position for each case
+    last_pos_per_case = data_baseline.groupby("case")[["index", "case",
+                                                       "pos"]].agg(max)
+    #use index of the last event per case to assign -1 to the last event
+    last_pos_per_case.set_index('index', inplace=True)
+    #last_pos_per_case = last_pos_per_case["next_event2"]
+    data_baseline.loc[last_pos_per_case.index, "next_event2"] = -1
+    #data_baseline
+
+    # Naive time predictor (wasn't tested on test dataset, since I have no idea how to measure time accuracy)
+
+    #find difference between completeTime of current event and the next event
+    data_baseline["duration_start-start"] = data_baseline["startTime"].diff()
+    #shift it up, so the difference corresponds to the current event
+    data_baseline["duration_start-start"] = data_baseline[
+        "duration_start-start"].shift(-1)
+    #set time duration between cases to NaT (last event per case, last position), since we only want time duration per case
+    data_baseline.loc[data_baseline[data_baseline["next_event2"] == -1].index,
+                      "duration_start-start"] = 'NaT'
+    #find average time duration between startTime of the events at current position and at the next position
+    predicted_duration = data_baseline.groupby(
+        "pos")['duration_start-start'].agg('mean')
+    #map the model results to the test dataset
+    data_baseline["predicted_duration"] = data_baseline['pos'].map(
+        predicted_duration)
+    #add predicted duration to completeTime to predict the startTime of the event in the next position
+    data_baseline["predicted_time"] = data_baseline[
+        "startTime"] + data_baseline["predicted_duration"]
+    data_baseline = data_baseline.drop(
+        ['predicted_duration', 'duration_start-start'], axis=1)
 
 
 def calc_feature_selection():
@@ -242,42 +342,57 @@ def tune_rf():
         'prev_event',
     ]
 
-    RF_fit = RF.fit(X_train_event[:100000].filter(items=dataset_col),
-                    Y_train_event[:100000])
+    RF_fit = RF.fit(X_train_event.filter(items=dataset_col), Y_train_event)
     print(RF.best_params_)
-    RF_pred = RF_fit.predict(X_test_event[:10000].filter(items=dataset_col))
+    RF_pred = RF_fit.predict(X_test_event.filter(items=dataset_col))
     org_test["event_RF"] = RF_pred
     print("Accuracy for Random Forest: ",
-          accuracy_score(Y_test_event[:10000], RF_pred[:10000]))
+          accuracy_score(Y_test_event, RF_pred))
+
+
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+
+
+def event_metrics(y_test, y_pred, avg="weighted", model="..."):
+
+    prec_score = precision_score(y_test, y_pred, average=avg, zero_division=0)
+    rec_score = recall_score(y_test, y_pred, average=avg, zero_division=0)
+    F1_score = f1_score(y_test, y_pred, average=avg, zero_division=0)
+    acc_score = accuracy_score(y_test, y_pred)
+
+    print("\n")
+    print(f"Error metrics for the {model} event model")
+    print("\n")
+    print(f'The accuracy of the model is {acc_score}.')
+    print(f'The precision of the model is {prec_score}, using {avg} average.')
+    print(f'The recall of the model is {rec_score}, using {avg} average.')
+    print(f'The f1-score of the model is {F1_score}, using {avg} average.')
+    print("\n")
+
+    return acc_score, prec_score, rec_score, F1_score
 
 
 def calc_random_forest():
     # Create the random grid
 
-    RF = RandomForestClassifier(n_jobs=6,
-                                verbose=2,
-                                n_estimators=100,
-                                min_samples_split=2,
-                                min_samples_leaf=4,
-                                max_features='log2',
-                                max_depth=80,
+    RF = RandomForestClassifier(n_estimators=100,
+                                min_samples_split=10,
+                                min_samples_leaf=2,
+                                max_features='sqrt',
+                                max_depth=50,
                                 bootstrap=True)
 
     dataset_col = [
-        'event',
-        'selected_random',
-        'subprocess',
-        'org:resource',
-        'duration',
-        'prev_event',
+        'event', 'selected_random', 'subprocess', 'org:resource', 'duration',
+        'prev_event', 'weekday'
     ]
 
     RF_fit = RF.fit(X_train_event.filter(items=dataset_col), Y_train_event)
-    # print(RF_fit.best)
     RF_pred = RF_fit.predict(X_test_event.filter(items=dataset_col))
-    org_test["event_RF"] = RF_pred
-    print("Accuracy for Random Forest: ",
-          accuracy_score(Y_test_event, RF_pred))
+    # org_test["event_RF"] = RF_pred
+    event_metrics(Y_test_event, RF_pred, model="Random Forest")
 
 
 def calc_LSTM():
@@ -310,9 +425,6 @@ def calc_LSTM():
             #  stateful=True,
             return_sequences=False))
     model.add(Dropout(0.2))
-    # model.add(LSTM(units=100))
-    # model.add(Dropout(0.2))
-    # model.add(Dense(units=1))
     model.add(Activation('softmax'))
 
     model.compile(optimizer='adam', loss='mse')
@@ -334,11 +446,218 @@ def calc_LSTM():
         mean_absolute_error(listValDuration_prediction,
                             yhat.flatten()[:len(listValDuration_prediction)]))
     print(yhat)
-    # return yhat.flatten()
 
 
+naive_baseline()
+# naive_time()
 # calc_feature_selection()
 calc_random_forest()
-# calc_LSTM()
+calc_LSTM()
 # tune_rf()
-# linear_regression()
+
+
+def normalize(df_name, col_name):
+    col_as_array = df_name[col_name].to_numpy()
+    col_as_array = np.where(col_as_array == 0, 0.01, col_as_array)
+    col_as_array_norm = np.log10(col_as_array)
+    mean = col_as_array_norm.mean()
+    stdev = col_as_array_norm.std()
+    epsilon = 0.01
+    return (col_as_array_norm - mean) / (stdev + epsilon)
+
+
+def prepfeatures(df_name):
+    event = df_name['event'].to_numpy()
+    event = event.reshape(-1, 1)
+    event = ordinal_encoder.fit_transform(event)
+
+    #selected_random = df_name['selected_random'].to_numpy()
+    #selected_random = selected_random.reshape(-1,1)
+    #selected_random = ordinal_encoder.fit_transform(selected_random)
+
+    #note = df_name['note'].to_numpy()
+    #note = note.reshape(-1,1)
+    #note = ordinal_encoder.fit_transform(note)
+
+    #eventid = org_train['eventid'].to_numpy()
+    #eventid = eventid + abs(org_train['eventid'].min())
+
+    #subprocess = df_name['subprocess'].to_numpy()
+    #subprocess = subprocess.reshape(-1,1)
+    #subprocess = ordinal_encoder.fit_transform(subprocess)
+
+    #doctype = df_name['doctype'].to_numpy()
+    #doctype = doctype.reshape(-1,1)
+    #doctype = ordinal_encoder.fit_transform(doctype)
+
+    duration = normalize(df_name, 'duration')
+    weekday = df_name['weekday'].to_numpy()
+
+    #startTime = normalize(df_name,'UNIX_starttime')
+
+    prev_event = df_name['prev_event'].to_numpy()
+    prev_event = prev_event.reshape(-1, 1)
+    prev_event = ordinal_encoder.fit_transform(prev_event)
+
+    features = []
+    for i in range(len(event)):
+        current = event[i]
+        #current = np.append(current,selected_random[i])
+        #current = np.append(current,note[i])
+        #current = np.append(current,eventid[i])
+        #current = np.append(current,subprocess[i])
+        #current = np.append(current,doctype[i])
+        current = np.append(current, duration[i])
+        current = np.append(current, weekday[i])
+        #current = np.append(current,startTime[i])
+        current = np.append(current, prev_event[i])
+        features.append(current)
+
+    return np.array(features)
+
+
+def preplabels(df_name):
+    labels = df_name['next_event'].to_numpy()
+    labels = label_encoder.fit_transform(labels)
+    labels = labels.reshape(-1, 1)
+
+    return np.array(labels)
+
+
+model = keras.Sequential([
+    keras.layers.Flatten(input_shape=(4, )),
+    keras.layers.Dense(20, activation='softplus'),
+    keras.layers.Dropout(1 / 10),
+    keras.layers.Dense(30, activation='softplus'),
+    keras.layers.Dropout(1 / 15),
+    keras.layers.Dense(42, activation='softplus')
+])
+
+model.compile(optimizer='Adam',
+              loss='sparse_categorical_crossentropy',
+              metrics=['accuracy'])
+
+losses = []
+accuracies = []
+
+
+def crossvalidation(k):
+    quantile = int(np.floor(len(data) / 5))
+    for i in range(1, k - 1):
+        train = data[:(quantile * i)]
+        train = train.sample(frac=1)
+        test = data[(quantile * i):(quantile * (i + 1))]
+
+        features = prepfeatures(train)
+        labels = preplabels(train)
+
+        print("Training on 0:", (quantile * i), "; Testing on ",
+              (quantile * i), ":", (quantile * (i + 1)))
+        model.fit(features, labels, epochs=3, verbose=1)
+
+        features_test = prepfeatures(test)
+        labels_test = preplabels(test)
+
+        eval = model.evaluate(features_test, labels_test)
+        losses.append(eval[0])
+        accuracies.append(eval[1])
+
+    return losses, accuracies
+
+
+losses, accuracies = crossvalidation(5)
+
+np.array(accuracies).mean()
+features_data = prepfeatures(data)
+prediction = model.predict(features_data)
+predicted_events = []
+for i in range(len(prediction)):
+    predicted_events.append(np.argmax(prediction[i]))
+
+predicted_events = label_encoder.inverse_transform(predicted_events)
+
+data['neuralnet_event_prediction'] = predicted_events
+
+
+def prepfeatures_regression(df_name):
+    event = df_name['event'].to_numpy()
+    event = event.reshape(-1, 1)
+    event = ordinal_encoder.fit_transform(event)
+
+    next_event = df_name['next_event'].to_numpy()
+    next_event = next_event.reshape(-1, 1)
+    next_event = ordinal_encoder.fit_transform(next_event)
+
+    year = df_name['year'].to_numpy()
+    year = year.reshape(-1, 1)
+    year = ordinal_encoder.fit_transform(year)
+
+    penalty_AVBP = df_name['penalty_AVBP'].to_numpy()
+    penalty_AVBP = penalty_AVBP.reshape(-1, 1)
+    penalty_AVBP = ordinal_encoder.fit_transform(penalty_AVBP)
+
+    penalty_AVGP = df_name['penalty_AVGP'].to_numpy()
+    penalty_AVGP = penalty_AVGP.reshape(-1, 1)
+    penalty_AVGP = ordinal_encoder.fit_transform(penalty_AVGP)
+
+    success = df_name['success'].to_numpy()
+    success = success.reshape(-1, 1)
+    success = ordinal_encoder.fit_transform(success)
+
+    eventid = df_name['eventid'].to_numpy()
+    eventid = success.reshape(-1, 1)
+
+    docid = df_name['docid'].to_numpy()
+    docid = success.reshape(-1, 1)
+
+    subprocess = df_name['subprocess'].to_numpy()
+    subprocess = subprocess.reshape(-1, 1)
+    subprocess = ordinal_encoder.fit_transform(subprocess)
+
+    weekday = df_name['weekday'].to_numpy()
+    weekday = weekday.reshape(-1, 1)
+
+    X = []
+    for i in range(len(event)):
+        current = event[i]
+        current = np.append(current, year[i])
+        current = np.append(current, penalty_AVBP[i])
+        current = np.append(current, penalty_AVGP[i])
+        current = np.append(current, success[i])
+        current = np.append(current, eventid[i])
+        current = np.append(current, docid[i])
+        current = np.append(current, next_event[i])
+        current = np.append(current, subprocess[i])
+        current = np.append(current, weekday[i])
+        X.append(current)
+
+    return np.array(X, dtype=float)
+
+
+def preplabels_regression(df_name):
+    duration = df_name['duration'].to_numpy()
+    return np.array(duration, dtype=float)
+
+
+X = prepfeatures_regression(org_train)
+y = preplabels_regression(org_train)
+huber = HuberRegressor().fit(X, y)
+
+X_test = prepfeatures_regression(org_test)
+
+org_test['regression_duration'] = huber.predict(X_test)
+org_test['error'] = np.absolute(org_test['duration'] -
+                                org_test['regression_duration'])
+org_test['error'].mean()
+
+X_for_prediction = prepfeatures_regression(data)
+data['regression_time_prediction'] = huber.predict(X_for_prediction)
+data['regression_time_prediction'] = data['regression_time_prediction'] + data[
+    'UNIX_starttime']
+data['regression_time_predicition'] = data['regression_time_prediction'].apply(
+    datetime.fromtimestamp)
+
+current, peak = tracemalloc.get_traced_memory()
+print(
+    f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
+tracemalloc.stop()

@@ -408,6 +408,7 @@ def calc_xgboost_rf():
     y = Y_train_event
     model.fit(X, y, verbose=True)
     prediction = model.predict(X_test_event.filter(items=dataset_col))
+    org_test["rf_event"] = prediction
     event_metrics(Y_test_event, prediction, model="RF")
 
 
@@ -428,7 +429,7 @@ def calc_random_forest():
 
     RF_fit = RF.fit(X_train_event.filter(items=dataset_col), Y_train_event)
     RF_pred = RF_fit.predict(X_test_event.filter(items=dataset_col))
-    # org_test["event_RF"] = RF_pred
+    org_test["event_RF"] = RF_pred
     event_metrics(Y_test_event, RF_pred, model="Random Forest")
 
 
@@ -481,6 +482,8 @@ def calc_LSTM():
     yhat = model.predict(x_input, verbose=1, use_multiprocessing=True)
     time_metrics(listValDuration_prediction,
                  yhat.flatten()[:len(listValDuration_prediction)])
+    org_test["lstm_duration_pred"] = yhat.flatten(
+    )[:len(listValDuration_prediction)]
 
 
 # naive_baseline()

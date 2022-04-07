@@ -507,29 +507,8 @@ def prepfeatures(df_name):
     event = event.reshape(-1, 1)
     event = ordinal_encoder.fit_transform(event)
 
-    #selected_random = df_name['selected_random'].to_numpy()
-    #selected_random = selected_random.reshape(-1,1)
-    #selected_random = ordinal_encoder.fit_transform(selected_random)
-
-    #note = df_name['note'].to_numpy()
-    #note = note.reshape(-1,1)
-    #note = ordinal_encoder.fit_transform(note)
-
-    #eventid = org_train['eventid'].to_numpy()
-    #eventid = eventid + abs(org_train['eventid'].min())
-
-    #subprocess = df_name['subprocess'].to_numpy()
-    #subprocess = subprocess.reshape(-1,1)
-    #subprocess = ordinal_encoder.fit_transform(subprocess)
-
-    #doctype = df_name['doctype'].to_numpy()
-    #doctype = doctype.reshape(-1,1)
-    #doctype = ordinal_encoder.fit_transform(doctype)
-
     duration = normalize(df_name, 'duration')
     weekday = df_name['weekday'].to_numpy()
-
-    #startTime = normalize(df_name,'UNIX_starttime')
 
     prev_event = df_name['prev_event'].to_numpy()
     prev_event = prev_event.reshape(-1, 1)
@@ -538,14 +517,8 @@ def prepfeatures(df_name):
     features = []
     for i in range(len(event)):
         current = event[i]
-        #current = np.append(current,selected_random[i])
-        #current = np.append(current,note[i])
-        #current = np.append(current,eventid[i])
-        #current = np.append(current,subprocess[i])
-        #current = np.append(current,doctype[i])
         current = np.append(current, duration[i])
         current = np.append(current, weekday[i])
-        #current = np.append(current,startTime[i])
         current = np.append(current, prev_event[i])
         features.append(current)
 
@@ -604,7 +577,7 @@ def crossvalidation(k):
 losses, accuracies = crossvalidation(5)
 
 np.array(accuracies).mean()
-features_data = prepfeatures(data)
+features_data = prepfeatures(org_test)
 prediction = model.predict(features_data)
 predicted_events = []
 for i in range(len(prediction)):
@@ -612,9 +585,9 @@ for i in range(len(prediction)):
 
 predicted_events = label_encoder.inverse_transform(predicted_events)
 
-event_metrics(data["next_event"], predicted_events)
+#event_metrics(data["next_event"], predicted_events)
 
-data['neuralnet_event_prediction'] = predicted_events
+org_test['neuralnet_event_prediction'] = predicted_events
 
 
 def prepfeatures_regression(df_name):
@@ -691,11 +664,11 @@ org_test['error'].mean()
 time_metrics(org_test["duration"], org_test['regression_duration'])
 
 # time_metrics(org_test['duration'], data['regression_duration'])
-X_for_prediction = prepfeatures_regression(data)
-data['regression_time_prediction'] = huber.predict(X_for_prediction)
-data['regression_time_prediction'] = data['regression_time_prediction'] + data[
+X_for_prediction = prepfeatures_regression(org_test)
+org_test['regression_time_prediction'] = huber.predict(X_for_prediction)
+org_test['regression_time_prediction'] = org_test['regression_time_prediction'] + org_test[
     'UNIX_starttime']
-data['regression_time_predicition'] = data['regression_time_prediction'].apply(
+org_test['regression_time_predicition'] = org_test['regression_time_prediction'].apply(
     datetime.fromtimestamp)
 
 current, peak = tracemalloc.get_traced_memory()

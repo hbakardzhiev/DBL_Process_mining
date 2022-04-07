@@ -215,12 +215,9 @@ Y_test_event = test["next_event"]
 
 # Random forest event
 
-# Naive event
-data_baseline = org_train[[
-    "case", "event", "startTime", "completeTime", "next_event", "enc_event",
-    "original index"
-]].copy()
-
+# Naive predictor
+data_baseline = org_train[["case", "event", "startTime", "completeTime", "next_event", "enc_event", "original index", "UNIX_starttime", "UNIX_completeTime", "duration"]].copy()
+test_baseline = org_test[["case", "event", "startTime", "completeTime", "next_event", "enc_event", "original index", "UNIX_starttime", "UNIX_completeTime", "duration"]].copy()
 
 # Naive Bayes
 def naive_baseline():
@@ -241,58 +238,63 @@ def naive_baseline():
             idx += 1
         res[-1] = count + 1
         return res
-
-    #get the position of each event per case
-    data_baseline = org_train[[
-        "case", "event", "startTime", "completeTime", "next_event",
-        "enc_event", "original index"
-    ]].copy()
     data_baseline["pos"] = calculator_pos(data_baseline['case'].to_numpy())
-    #data_baseline = data_baseline[["case", "event", "startTime", "completeTime", "next_event", "enc_event",  "pos", "original index"]].copy()
-
     #select most occuring event for each position
-    #see https://stackoverflow.com/questions/15222754/groupby-pandas-dataframe-and-select-most-common-value
-    events_count = data_baseline.groupby("pos")['enc_event'].agg(
-        lambda x: pd.Series.mode(x)[0]).to_frame()
-    events_count = events_count.rename(columns={"pos": "enc_event"})
+    events_count = data_baseline.groupby("pos")['enc_event'].agg(lambda x: pd.Series.mode(x)[0]).to_frame()
+    events_count = events_count.rename(columns={"pos":"enc_event"})
     #Next event for each position (most occuring event in the next position, e.g. 1-25, 2-26, so for 1 we predict 26)
     events_count['next_event2'] = events_count['enc_event'].shift(-1)
     events_count["next_event2"].iloc[-1] = 0
     #map the model results to the original dataframe
-    data_baseline["next_event2"] = data_baseline["pos"].map(
-        events_count["next_event2"])
+    data_baseline["next_event2"] = data_baseline["pos"].map(events_count["next_event2"])
     #Cleaning, set last events for each case to -1, so that we don't use them in final result and error estimation.
     data_baseline["index"] = data_baseline.index
     #find last position for each case
-    last_pos_per_case = data_baseline.groupby("case")[["index", "case",
-                                                       "pos"]].agg(max)
+    last_pos_per_case = data_baseline.groupby("case")[["index","case","pos"]].agg(max)
     #use index of the last event per case to assign -1 to the last event
     last_pos_per_case.set_index('index', inplace=True)
     #last_pos_per_case = last_pos_per_case["next_event2"]
     data_baseline.loc[last_pos_per_case.index, "next_event2"] = -1
-    #data_baseline
-
-    # Naive time predictor (wasn't tested on test dataset, since I have no idea how to measure time accuracy)
-
+        
+    #Use the naive event model on test dataset
+    test_baseline["pos"] = calculator_pos(test_baseline['case'].to_numpy())
+    test_baseline["next_event2"] = test_baseline["pos"].map(events_count["next_event2"])
+    test_baseline["index"] = test_baseline.index
+    last_pos_per_case = test_baseline.groupby("case")[["index","case","pos"]].agg(max)
+    last_pos_per_case.set_index('index', inplace=True)
+    test_baseline.loc[last_pos_per_case.index, "next_event2"] = -1
+    y_true_event = test_baseline["enc_event"].to_numpy().astype(int)
+    y_pred_event = test_baseline["next_event2"].to_numpy().astype(int)
+    # Naive time predictor
     #find difference between completeTime of current event and the next event
-    data_baseline["duration_start-start"] = data_baseline["startTime"].diff()
+    data_baseline["duration_start-start"] = pd.to_numeric(data_baseline["UNIX_starttime"].diff(), downcast='signed')
+    #data_baseline["duration_start-start"] = data_baseline["UNIX_starttime"].diff()
     #shift it up, so the difference corresponds to the current event
-    data_baseline["duration_start-start"] = data_baseline[
-        "duration_start-start"].shift(-1)
+    data_baseline["duration_start-start"] = pd.to_numeric(data_baseline["duration_start-start"].shift(-1))
     #set time duration between cases to NaT (last event per case, last position), since we only want time duration per case
-    data_baseline.loc[data_baseline[data_baseline["next_event2"] == -1].index,
-                      "duration_start-start"] = 'NaT'
+    data_baseline.loc[ data_baseline[ data_baseline["next_event2"] == -1 ].index, "duration_start-start"] = None#'NaT'
     #find average time duration between startTime of the events at current position and at the next position
-    predicted_duration = data_baseline.groupby(
-        "pos")['duration_start-start'].agg('mean')
-    #map the model results to the test dataset
-    data_baseline["predicted_duration"] = data_baseline['pos'].map(
-        predicted_duration)
+    predicted_duration = data_baseline.groupby("pos")['duration_start-start'].agg('mean')
+    data_baseline["predicted_duration"] = data_baseline['pos'].map(predicted_duration)
     #add predicted duration to completeTime to predict the startTime of the event in the next position
-    data_baseline["predicted_time"] = data_baseline[
-        "startTime"] + data_baseline["predicted_duration"]
-    data_baseline = data_baseline.drop(
-        ['predicted_duration', 'duration_start-start'], axis=1)
+    data_baseline["predicted_time"] = data_baseline["UNIX_starttime"] + data_baseline["predicted_duration"]
+    #naive predictor for test dataset
+    test_baseline["predicted_duration"] = test_baseline['pos'].map(predicted_duration)
+    test_baseline["predicted_time"] = test_baseline["UNIX_starttime"] + test_baseline["predicted_duration"]
+    #actual duration of each event
+    duration = data_baseline.groupby("pos")['duration'].agg('mean')
+    test_baseline["predicted_duration"] = test_baseline['pos'].map(predicted_duration)
+    #y_true_time = test_baseline["UNIX_starttime"].to_numpy().astype(int)
+    #y_pred_time = test_baseline["predicted_time"].to_numpy().astype(int)
+    y_true_time = test_baseline["duration"].to_numpy().astype(int)
+    y_pred_time = test_baseline["predicted_duration"].to_numpy().astype(int)
+    #Error measurement
+    event_metrics(y_true_event, y_pred_event, model="Naive_event")
+    time_metrics(y_true_time, y_pred_time, model="Naive_time")
+    #add columns
+    org_test["event_naive"] = test_baseline["next_event2"]
+    org_test["duration_naive"] = test_baseline["predicted_duration"]
+    org_test["startTime_naive"] = test_baseline["predicted_time"]
 
 
 def calc_feature_selection():

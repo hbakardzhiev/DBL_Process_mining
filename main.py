@@ -701,4 +701,5 @@ data['regression_time_predicition'] = data['regression_time_prediction'].apply(
 current, peak = tracemalloc.get_traced_memory()
 print(
     f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
+print('The CPU usage is: ', psutil.cpu_percent(4))
 tracemalloc.stop()

@@ -377,7 +377,23 @@ def event_metrics(y_test, y_pred, avg="weighted", model="..."):
     return acc_score, prec_score, rec_score, F1_score
 
 
+def evaluate_model(model, X, y):
+    # define the model evaluation procedure
+    cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+    # evaluate the model
+    scores = cross_val_score(model, X, y, scoring='accuracy', cv=cv, n_jobs=-1)
+    return scores
+
+
 def calc_xgboost_rf():
+    cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
+    n_scores = cross_val_score(model,
+                               X,
+                               y,
+                               scoring='accuracy',
+                               cv=cv,
+                               n_jobs=-1)
+
     model = XGBRFClassifier(n_estimators=100,
                             subsample=0.9,
                             colsample_bynode=0.2,
@@ -463,214 +479,226 @@ def calc_LSTM():
 
     x_input = x_input.reshape((x_input.shape[0], n_steps, n_features))
     yhat = model.predict(x_input, verbose=1, use_multiprocessing=True)
-    print(
-        mean_absolute_error(listValDuration_prediction,
-                            yhat.flatten()[:len(listValDuration_prediction)]))
-    print(yhat)
+    time_metrics(listValDuration_prediction,
+                 yhat.flatten()[:len(listValDuration_prediction)])
 
 
 # naive_baseline()
 # naive_time()
 # calc_feature_selection()
 # calc_random_forest()
-# calc_LSTM()
+calc_LSTM()
 # tune_rf()
-calc_xgboost_rf()
+# calc_xgboost_rf()
 
-# def normalize(df_name, col_name):
-#     col_as_array = df_name[col_name].to_numpy()
-#     col_as_array = np.where(col_as_array == 0, 0.01, col_as_array)
-#     col_as_array_norm = np.log10(col_as_array)
-#     mean = col_as_array_norm.mean()
-#     stdev = col_as_array_norm.std()
-#     epsilon = 0.01
-#     return (col_as_array_norm - mean) / (stdev + epsilon)
 
-# def prepfeatures(df_name):
-#     event = df_name['event'].to_numpy()
-#     event = event.reshape(-1, 1)
-#     event = ordinal_encoder.fit_transform(event)
+def normalize(df_name, col_name):
+    col_as_array = df_name[col_name].to_numpy()
+    col_as_array = np.where(col_as_array == 0, 0.01, col_as_array)
+    col_as_array_norm = np.log10(col_as_array)
+    mean = col_as_array_norm.mean()
+    stdev = col_as_array_norm.std()
+    epsilon = 0.01
+    return (col_as_array_norm - mean) / (stdev + epsilon)
 
-#     #selected_random = df_name['selected_random'].to_numpy()
-#     #selected_random = selected_random.reshape(-1,1)
-#     #selected_random = ordinal_encoder.fit_transform(selected_random)
 
-#     #note = df_name['note'].to_numpy()
-#     #note = note.reshape(-1,1)
-#     #note = ordinal_encoder.fit_transform(note)
+def prepfeatures(df_name):
+    event = df_name['event'].to_numpy()
+    event = event.reshape(-1, 1)
+    event = ordinal_encoder.fit_transform(event)
 
-#     #eventid = org_train['eventid'].to_numpy()
-#     #eventid = eventid + abs(org_train['eventid'].min())
+    #selected_random = df_name['selected_random'].to_numpy()
+    #selected_random = selected_random.reshape(-1,1)
+    #selected_random = ordinal_encoder.fit_transform(selected_random)
 
-#     #subprocess = df_name['subprocess'].to_numpy()
-#     #subprocess = subprocess.reshape(-1,1)
-#     #subprocess = ordinal_encoder.fit_transform(subprocess)
+    #note = df_name['note'].to_numpy()
+    #note = note.reshape(-1,1)
+    #note = ordinal_encoder.fit_transform(note)
 
-#     #doctype = df_name['doctype'].to_numpy()
-#     #doctype = doctype.reshape(-1,1)
-#     #doctype = ordinal_encoder.fit_transform(doctype)
+    #eventid = org_train['eventid'].to_numpy()
+    #eventid = eventid + abs(org_train['eventid'].min())
 
-#     duration = normalize(df_name, 'duration')
-#     weekday = df_name['weekday'].to_numpy()
+    #subprocess = df_name['subprocess'].to_numpy()
+    #subprocess = subprocess.reshape(-1,1)
+    #subprocess = ordinal_encoder.fit_transform(subprocess)
 
-#     #startTime = normalize(df_name,'UNIX_starttime')
+    #doctype = df_name['doctype'].to_numpy()
+    #doctype = doctype.reshape(-1,1)
+    #doctype = ordinal_encoder.fit_transform(doctype)
 
-#     prev_event = df_name['prev_event'].to_numpy()
-#     prev_event = prev_event.reshape(-1, 1)
-#     prev_event = ordinal_encoder.fit_transform(prev_event)
+    duration = normalize(df_name, 'duration')
+    weekday = df_name['weekday'].to_numpy()
 
-#     features = []
-#     for i in range(len(event)):
-#         current = event[i]
-#         #current = np.append(current,selected_random[i])
-#         #current = np.append(current,note[i])
-#         #current = np.append(current,eventid[i])
-#         #current = np.append(current,subprocess[i])
-#         #current = np.append(current,doctype[i])
-#         current = np.append(current, duration[i])
-#         current = np.append(current, weekday[i])
-#         #current = np.append(current,startTime[i])
-#         current = np.append(current, prev_event[i])
-#         features.append(current)
+    #startTime = normalize(df_name,'UNIX_starttime')
 
-#     return np.array(features)
+    prev_event = df_name['prev_event'].to_numpy()
+    prev_event = prev_event.reshape(-1, 1)
+    prev_event = ordinal_encoder.fit_transform(prev_event)
 
-# def preplabels(df_name):
-#     labels = df_name['next_event'].to_numpy()
-#     labels = label_encoder.fit_transform(labels)
-#     labels = labels.reshape(-1, 1)
+    features = []
+    for i in range(len(event)):
+        current = event[i]
+        #current = np.append(current,selected_random[i])
+        #current = np.append(current,note[i])
+        #current = np.append(current,eventid[i])
+        #current = np.append(current,subprocess[i])
+        #current = np.append(current,doctype[i])
+        current = np.append(current, duration[i])
+        current = np.append(current, weekday[i])
+        #current = np.append(current,startTime[i])
+        current = np.append(current, prev_event[i])
+        features.append(current)
 
-#     return np.array(labels)
+    return np.array(features)
 
-# model = keras.Sequential([
-#     keras.layers.Flatten(input_shape=(4, )),
-#     keras.layers.Dense(20, activation='softplus'),
-#     keras.layers.Dropout(1 / 10),
-#     keras.layers.Dense(30, activation='softplus'),
-#     keras.layers.Dropout(1 / 15),
-#     keras.layers.Dense(42, activation='softplus')
-# ])
 
-# model.compile(optimizer='Adam',
-#               loss='sparse_categorical_crossentropy',
-#               metrics=['accuracy'])
+def preplabels(df_name):
+    labels = df_name['next_event'].to_numpy()
+    labels = label_encoder.fit_transform(labels)
+    labels = labels.reshape(-1, 1)
 
-# losses = []
-# accuracies = []
+    return np.array(labels)
 
-# def crossvalidation(k):
-#     quantile = int(np.floor(len(data) / 5))
-#     for i in range(1, k - 1):
-#         train = data[:(quantile * i)]
-#         train = train.sample(frac=1)
-#         test = data[(quantile * i):(quantile * (i + 1))]
 
-#         features = prepfeatures(train)
-#         labels = preplabels(train)
+model = keras.Sequential([
+    keras.layers.Flatten(input_shape=(4, )),
+    keras.layers.Dense(20, activation='softplus'),
+    keras.layers.Dropout(1 / 10),
+    keras.layers.Dense(30, activation='softplus'),
+    keras.layers.Dropout(1 / 15),
+    keras.layers.Dense(42, activation='softplus')
+])
 
-#         print("Training on 0:", (quantile * i), "; Testing on ",
-#               (quantile * i), ":", (quantile * (i + 1)))
-#         model.fit(features, labels, epochs=3, verbose=1)
+model.compile(optimizer='Adam',
+              loss='sparse_categorical_crossentropy',
+              metrics=['accuracy'])
 
-#         features_test = prepfeatures(test)
-#         labels_test = preplabels(test)
+losses = []
+accuracies = []
 
-#         eval = model.evaluate(features_test, labels_test)
-#         losses.append(eval[0])
-#         accuracies.append(eval[1])
 
-#     return losses, accuracies
+def crossvalidation(k):
+    quantile = int(np.floor(len(data) / 5))
+    for i in range(1, k - 1):
+        train = data[:(quantile * i)]
+        train = train.sample(frac=1)
+        test = data[(quantile * i):(quantile * (i + 1))]
 
-# losses, accuracies = crossvalidation(5)
+        features = prepfeatures(train)
+        labels = preplabels(train)
 
-# np.array(accuracies).mean()
-# features_data = prepfeatures(data)
-# prediction = model.predict(features_data)
-# predicted_events = []
-# for i in range(len(prediction)):
-#     predicted_events.append(np.argmax(prediction[i]))
+        print("Training on 0:", (quantile * i), "; Testing on ",
+              (quantile * i), ":", (quantile * (i + 1)))
+        model.fit(features, labels, epochs=3, verbose=1)
 
-# predicted_events = label_encoder.inverse_transform(predicted_events)
+        features_test = prepfeatures(test)
+        labels_test = preplabels(test)
 
-# data['neuralnet_event_prediction'] = predicted_events
+        eval = model.evaluate(features_test, labels_test)
+        losses.append(eval[0])
+        accuracies.append(eval[1])
 
-# def prepfeatures_regression(df_name):
-#     event = df_name['event'].to_numpy()
-#     event = event.reshape(-1, 1)
-#     event = ordinal_encoder.fit_transform(event)
+    return losses, accuracies
 
-#     next_event = df_name['next_event'].to_numpy()
-#     next_event = next_event.reshape(-1, 1)
-#     next_event = ordinal_encoder.fit_transform(next_event)
 
-#     year = df_name['year'].to_numpy()
-#     year = year.reshape(-1, 1)
-#     year = ordinal_encoder.fit_transform(year)
+losses, accuracies = crossvalidation(5)
 
-#     penalty_AVBP = df_name['penalty_AVBP'].to_numpy()
-#     penalty_AVBP = penalty_AVBP.reshape(-1, 1)
-#     penalty_AVBP = ordinal_encoder.fit_transform(penalty_AVBP)
+np.array(accuracies).mean()
+features_data = prepfeatures(data)
+prediction = model.predict(features_data)
+predicted_events = []
+for i in range(len(prediction)):
+    predicted_events.append(np.argmax(prediction[i]))
 
-#     penalty_AVGP = df_name['penalty_AVGP'].to_numpy()
-#     penalty_AVGP = penalty_AVGP.reshape(-1, 1)
-#     penalty_AVGP = ordinal_encoder.fit_transform(penalty_AVGP)
+predicted_events = label_encoder.inverse_transform(predicted_events)
 
-#     success = df_name['success'].to_numpy()
-#     success = success.reshape(-1, 1)
-#     success = ordinal_encoder.fit_transform(success)
+event_metrics(data["next_event"], predicted_events)
 
-#     eventid = df_name['eventid'].to_numpy()
-#     eventid = success.reshape(-1, 1)
+data['neuralnet_event_prediction'] = predicted_events
 
-#     docid = df_name['docid'].to_numpy()
-#     docid = success.reshape(-1, 1)
 
-#     subprocess = df_name['subprocess'].to_numpy()
-#     subprocess = subprocess.reshape(-1, 1)
-#     subprocess = ordinal_encoder.fit_transform(subprocess)
+def prepfeatures_regression(df_name):
+    event = df_name['event'].to_numpy()
+    event = event.reshape(-1, 1)
+    event = ordinal_encoder.fit_transform(event)
 
-#     weekday = df_name['weekday'].to_numpy()
-#     weekday = weekday.reshape(-1, 1)
+    next_event = df_name['next_event'].to_numpy()
+    next_event = next_event.reshape(-1, 1)
+    next_event = ordinal_encoder.fit_transform(next_event)
 
-#     X = []
-#     for i in range(len(event)):
-#         current = event[i]
-#         current = np.append(current, year[i])
-#         current = np.append(current, penalty_AVBP[i])
-#         current = np.append(current, penalty_AVGP[i])
-#         current = np.append(current, success[i])
-#         current = np.append(current, eventid[i])
-#         current = np.append(current, docid[i])
-#         current = np.append(current, next_event[i])
-#         current = np.append(current, subprocess[i])
-#         current = np.append(current, weekday[i])
-#         X.append(current)
+    year = df_name['year'].to_numpy()
+    year = year.reshape(-1, 1)
+    year = ordinal_encoder.fit_transform(year)
 
-#     return np.array(X, dtype=float)
+    penalty_AVBP = df_name['penalty_AVBP'].to_numpy()
+    penalty_AVBP = penalty_AVBP.reshape(-1, 1)
+    penalty_AVBP = ordinal_encoder.fit_transform(penalty_AVBP)
 
-# def preplabels_regression(df_name):
-#     duration = df_name['duration'].to_numpy()
-#     return np.array(duration, dtype=float)
+    penalty_AVGP = df_name['penalty_AVGP'].to_numpy()
+    penalty_AVGP = penalty_AVGP.reshape(-1, 1)
+    penalty_AVGP = ordinal_encoder.fit_transform(penalty_AVGP)
 
-# X = prepfeatures_regression(org_train)
-# y = preplabels_regression(org_train)
-# huber = HuberRegressor().fit(X, y)
+    success = df_name['success'].to_numpy()
+    success = success.reshape(-1, 1)
+    success = ordinal_encoder.fit_transform(success)
 
-# X_test = prepfeatures_regression(org_test)
+    eventid = df_name['eventid'].to_numpy()
+    eventid = success.reshape(-1, 1)
 
-# org_test['regression_duration'] = huber.predict(X_test)
-# org_test['error'] = np.absolute(org_test['duration'] -
-#                                 org_test['regression_duration'])
-# org_test['error'].mean()
+    docid = df_name['docid'].to_numpy()
+    docid = success.reshape(-1, 1)
 
-# X_for_prediction = prepfeatures_regression(data)
-# data['regression_time_prediction'] = huber.predict(X_for_prediction)
-# data['regression_time_prediction'] = data['regression_time_prediction'] + data[
-#     'UNIX_starttime']
-# data['regression_time_predicition'] = data['regression_time_prediction'].apply(
-#     datetime.fromtimestamp)
+    subprocess = df_name['subprocess'].to_numpy()
+    subprocess = subprocess.reshape(-1, 1)
+    subprocess = ordinal_encoder.fit_transform(subprocess)
 
-# current, peak = tracemalloc.get_traced_memory()
-# print(
-#     f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
-# tracemalloc.stop()
+    weekday = df_name['weekday'].to_numpy()
+    weekday = weekday.reshape(-1, 1)
+
+    X = []
+    for i in range(len(event)):
+        current = event[i]
+        current = np.append(current, year[i])
+        current = np.append(current, penalty_AVBP[i])
+        current = np.append(current, penalty_AVGP[i])
+        current = np.append(current, success[i])
+        current = np.append(current, eventid[i])
+        current = np.append(current, docid[i])
+        current = np.append(current, next_event[i])
+        current = np.append(current, subprocess[i])
+        current = np.append(current, weekday[i])
+        X.append(current)
+
+    return np.array(X, dtype=float)
+
+
+def preplabels_regression(df_name):
+    duration = df_name['duration'].to_numpy()
+    return np.array(duration, dtype=float)
+
+
+X = prepfeatures_regression(org_train)
+y = preplabels_regression(org_train)
+huber = HuberRegressor().fit(X, y)
+
+X_test = prepfeatures_regression(org_test)
+
+org_test['regression_duration'] = huber.predict(X_test)
+org_test['error'] = np.absolute(org_test['duration'] -
+                                org_test['regression_duration'])
+org_test['error'].mean()
+
+time_metrics(org_test["duration"], org_test['regression_duration'])
+
+# time_metrics(org_test['duration'], data['regression_duration'])
+X_for_prediction = prepfeatures_regression(data)
+data['regression_time_prediction'] = huber.predict(X_for_prediction)
+data['regression_time_prediction'] = data['regression_time_prediction'] + data[
+    'UNIX_starttime']
+data['regression_time_predicition'] = data['regression_time_prediction'].apply(
+    datetime.fromtimestamp)
+
+current, peak = tracemalloc.get_traced_memory()
+print(
+    f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
+tracemalloc.stop()

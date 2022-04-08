@@ -504,11 +504,11 @@ def calc_LSTM():
     org_test["lstm_duration_pred"] = prediction
 
 
-# naive_baseline()
+naive_baseline()
 # naive_time()
 # calc_feature_selection()
 # calc_random_forest()
-# calc_LSTM()
+calc_LSTM() 
 # tune_rf()
 calc_xgboost_rf()
 

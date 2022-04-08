@@ -380,6 +380,9 @@ import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 
+encoder = LabelEncoder()
+encoder.fit(org_train["event"])
+
 
 def event_metrics(y_test, y_pred, avg="weighted", model="..."):
 
@@ -409,8 +412,6 @@ def evaluate_model(model, X, y):
 
 
 def calc_xgboost_rf():
-    encoder = LabelEncoder()
-    encoder.fit(org_train["event"])
     model = XGBRFClassifier(n_estimators=100,
                             subsample=0.9,
                             colsample_bynode=0.2,

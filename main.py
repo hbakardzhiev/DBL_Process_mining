@@ -175,6 +175,8 @@ data['enc_event'] = ordinal_encoder.fit_transform(data[['event']]).astype(int)
 #ensure we have acces to orignal indexing to keep track of the order of events in a process
 data['original index'] = data.index
 
+data = data[:1000]
+
 #sorting on time
 data.sort_values(by="UNIX_starttime", ignore_index=True)
 
@@ -195,19 +197,19 @@ intersect_list = list(set(train_cases).intersection(test_cases))
 #test = test[test['case'] != intersect_list[0]]
 
 #works for more values
-org_train = train.copy()
-org_test = test.copy()
+org_train = train.copy()[:1000]
+org_test = test.copy()[:1000]
 df_ordinal_encoder = LabelEncoder()
 train = train.apply(df_ordinal_encoder.fit_transform)
 test = test.apply(df_ordinal_encoder.fit_transform)
 
-train = train[train['case'].isin(intersect_list) == False]
+train = train[train['case'].isin(intersect_list) == False][:1000]
 X_train_time = train.drop(columns='duration')
 Y_train_time = train["duration"]
 X_train_event = train.drop(columns=["next_event"])
 Y_train_event = train["next_event"]
 
-test = test[test['case'].isin(intersect_list) == False]
+test = test[test['case'].isin(intersect_list) == False][:1000]
 X_test_time = test.drop(columns='duration')
 Y_test_time = test["duration"]
 X_test_event = test.drop(columns=['next_event'])
@@ -216,8 +218,15 @@ Y_test_event = test["next_event"]
 # Random forest event
 
 # Naive event
-data_baseline = org_train[["case", "event", "startTime", "completeTime", "next_event", "enc_event", "original index", "UNIX_starttime", "UNIX_completeTime", "duration"]].copy()
-test_baseline = org_test[["case", "event", "startTime", "completeTime", "next_event", "enc_event", "original index", "UNIX_starttime", "UNIX_completeTime", "duration"]].copy()
+data_baseline = org_train[[
+    "case", "event", "startTime", "completeTime", "next_event", "enc_event",
+    "original index", "UNIX_starttime", "UNIX_completeTime", "duration"
+]].copy()
+test_baseline = org_test[[
+    "case", "event", "startTime", "completeTime", "next_event", "enc_event",
+    "original index", "UNIX_starttime", "UNIX_completeTime", "duration"
+]].copy()
+
 
 # Naive Bayes
 def naive_baseline():
@@ -238,55 +247,73 @@ def naive_baseline():
             idx += 1
         res[-1] = count + 1
         return res
+
     data_baseline["pos"] = calculator_pos(data_baseline['case'].to_numpy())
     #select most occuring event for each position
-    events_count = data_baseline.groupby("pos")['enc_event'].agg(lambda x: pd.Series.mode(x)[0]).to_frame()
-    events_count = events_count.rename(columns={"pos":"enc_event"})
+    events_count = data_baseline.groupby("pos")['enc_event'].agg(
+        lambda x: pd.Series.mode(x)[0]).to_frame()
+    events_count = events_count.rename(columns={"pos": "enc_event"})
     #Next event for each position (most occuring event in the next position, e.g. 1-25, 2-26, so for 1 we predict 26)
     events_count['next_event2'] = events_count['enc_event'].shift(-1)
     events_count["next_event2"].iloc[-1] = 0
     #map the model results to the original dataframe
-    data_baseline["next_event2"] = data_baseline["pos"].map(events_count["next_event2"])
+    data_baseline["next_event2"] = data_baseline["pos"].map(
+        events_count["next_event2"])
     #Cleaning, set last events for each case to -1, so that we don't use them in final result and error estimation.
     data_baseline["index"] = data_baseline.index
     #find last position for each case
-    last_pos_per_case = data_baseline.groupby("case")[["index","case","pos"]].agg(max)
+    last_pos_per_case = data_baseline.groupby("case")[["index", "case",
+                                                       "pos"]].agg(max)
     #use index of the last event per case to assign -1 to the last event
     last_pos_per_case.set_index('index', inplace=True)
+    #last_pos_per_case = last_pos_per_case["next_event2"]
     data_baseline.loc[last_pos_per_case.index, "next_event2"] = -1
-        
+
     #Use the naive event model on test dataset
     test_baseline["pos"] = calculator_pos(test_baseline['case'].to_numpy())
-    test_baseline["next_event2"] = test_baseline["pos"].map(events_count["next_event2"])
+    test_baseline["next_event2"] = test_baseline["pos"].map(
+        events_count["next_event2"])
     test_baseline["index"] = test_baseline.index
-    last_pos_per_case = test_baseline.groupby("case")[["index","case","pos"]].agg(max)
+    last_pos_per_case = test_baseline.groupby("case")[["index", "case",
+                                                       "pos"]].agg(max)
     last_pos_per_case.set_index('index', inplace=True)
     test_baseline.loc[last_pos_per_case.index, "next_event2"] = -1
     y_true_event = test_baseline["enc_event"].to_numpy().astype(int)
     y_pred_event = test_baseline["next_event2"].to_numpy().astype(int)
+
     # Naive time predictor
     #find difference between completeTime of current event and the next event
-    data_baseline["duration_start-start"] = pd.to_numeric(data_baseline["UNIX_starttime"].diff(), downcast='signed')
+    data_baseline["duration_start-start"] = pd.to_numeric(
+        data_baseline["UNIX_starttime"].diff(), downcast='signed')
     #shift it up, so the difference corresponds to the current event
-    data_baseline["duration_start-start"] = pd.to_numeric(data_baseline["duration_start-start"].shift(-1))
+    data_baseline["duration_start-start"] = pd.to_numeric(
+        data_baseline["duration_start-start"].shift(-1))
     #set time duration between cases to NaT (last event per case, last position), since we only want time duration per case
-    data_baseline.loc[ data_baseline[ data_baseline["next_event2"] == -1 ].index, "duration_start-start"] = None
+    data_baseline.loc[data_baseline[data_baseline["next_event2"] == -1].index,
+                      "duration_start-start"] = None
     #find average time duration between startTime of the events at current position and at the next position
-    predicted_duration = data_baseline.groupby("pos")['duration_start-start'].agg('mean')
-    data_baseline["predicted_duration"] = data_baseline['pos'].map(predicted_duration)
+    predicted_duration = data_baseline.groupby(
+        "pos")['duration_start-start'].agg('mean')
+    data_baseline["predicted_duration"] = data_baseline['pos'].map(
+        predicted_duration)
     #add predicted duration to completeTime to predict the startTime of the event in the next position
-    data_baseline["predicted_time"] = data_baseline["UNIX_starttime"] + data_baseline["predicted_duration"]
+    data_baseline["predicted_time"] = data_baseline[
+        "UNIX_starttime"] + data_baseline["predicted_duration"]
     #naive predictor for test dataset
-    test_baseline["predicted_duration"] = test_baseline['pos'].map(predicted_duration)
-    test_baseline["predicted_time"] = test_baseline["UNIX_starttime"] + test_baseline["predicted_duration"]
+    test_baseline["predicted_duration"] = test_baseline['pos'].map(
+        predicted_duration)
+    test_baseline["predicted_time"] = test_baseline[
+        "UNIX_starttime"] + test_baseline["predicted_duration"]
     y_true_time = test_baseline["UNIX_starttime"].to_numpy().astype(int)
     y_pred_time = test_baseline["predicted_time"].to_numpy().astype(int)
     #Error measurement
     event_metrics(y_true_event, y_pred_event, model="Naive_event")
     time_metrics(y_true_time, y_pred_time, model="Naive_time")
     #add columns
-    org_test["event_naive"] = ordinal_encoder.inverse_transform(test_baseline[["next_event2"]])
-    org_test.loc[ test_baseline[ test_baseline["next_event2"] == -1 ].index, "event_naive"] = None
+    org_test["event_naive"] = ordinal_encoder.inverse_transform(
+        test_baseline[["next_event2"]])
+    org_test.loc[test_baseline[test_baseline["next_event2"] == -1].index,
+                 "event_naive"] = None
     org_test["duration_naive"] = test_baseline["predicted_duration"]
     org_test["startTime_naive"] = test_baseline["predicted_time"]
 
@@ -382,29 +409,22 @@ def evaluate_model(model, X, y):
 
 
 def calc_xgboost_rf():
-    cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
-    n_scores = cross_val_score(model,
-                               X,
-                               y,
-                               scoring='accuracy',
-                               cv=cv,
-                               n_jobs=-1)
-
+    encoder = LabelEncoder()
+    encoder.fit(org_train["event"])
     model = XGBRFClassifier(n_estimators=100,
                             subsample=0.9,
                             colsample_bynode=0.2,
                             use_label_encoder=True)
-
+    # cv = RepeatedStratifiedKFold(n_splits=10, n_repeats=3, random_state=1)
     dataset_col = [
         'event', 'selected_random', 'subprocess', 'org:resource', 'duration',
         'prev_event', 'weekday'
     ]
-
     X = X_train_event.filter(items=dataset_col)
     y = Y_train_event
     model.fit(X, y, verbose=True)
     prediction = model.predict(X_test_event.filter(items=dataset_col))
-    org_test["rf_event"] = ordinal_encoder.inverse_tranform(prediction)
+    org_test["rf_event"] = encoder.inverse_transform(prediction)
     event_metrics(Y_test_event, prediction, model="RF")
 
 
@@ -460,7 +480,7 @@ def calc_LSTM():
             return_sequences=False))
     model.add(Dropout(0.2))
     model.add(Activation('softmax'))
-
+    print('The CPU usage is: ', psutil.cpu_percent(4))
     model.compile(optimizer='adam', loss='mse')
 
     model.fit(X,
@@ -487,9 +507,9 @@ def calc_LSTM():
 # naive_time()
 # calc_feature_selection()
 # calc_random_forest()
-calc_LSTM()
+# calc_LSTM()
 # tune_rf()
-# calc_xgboost_rf()
+calc_xgboost_rf()
 
 
 def normalize(df_name, col_name):
@@ -674,5 +694,7 @@ org_test['regression_time_predicition'] = org_test[
 current, peak = tracemalloc.get_traced_memory()
 print(
     f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
-print('The CPU usage is: ', psutil.cpu_percent(4))
+
+org_test.to_csv("exported.csv")
+
 tracemalloc.stop()

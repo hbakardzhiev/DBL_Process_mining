@@ -228,6 +228,7 @@ test_baseline = org_test[[
 
 # Naive Bayes
 def naive_baseline():
+
     @jit(parallel=True)
     def calculator_pos(case):
         res = np.empty(len(case), dtype=object)
@@ -426,7 +427,7 @@ def calc_xgboost_rf():
     y = Y_train_event
     model.fit(X, y, verbose=True)
     prediction = model.predict(X_test_event.filter(items=dataset_col))
-    org_test["rf_event"] = prediction
+    org_test["rf_event"] = ordinal_encoder.inverse_tranform(prediction)
     event_metrics(Y_test_event, prediction, model="RF")
 
 
